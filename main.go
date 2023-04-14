@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"log"
 	"net"
 )
@@ -39,6 +40,58 @@ func handler(conn net.Conn) {
 	// Select the authorization methods you want
 	if _, err = conn.Write([]byte{0x05, 0x02}); err != nil {
 		log.Printf("Failed to write methods to client: %s", err)
+		return
+	}
+
+	// Authorization
+	var subVersion [1]byte
+	_, err = conn.Read(subVersion[:])
+	if err != nil {
+		log.Printf("Failed to read sub-version from connection: %s", err)
+		return
+	}
+	if subVersion[0] != 0x01 {
+		log.Printf("Socks5 sub-version mismatches: %x", subVersion[0])
+		return
+	}
+
+	var unLength [1]byte
+	_, err = conn.Read(unLength[:])
+	if err != nil {
+		log.Printf("Failed to read username length from connection: %s", err)
+		return
+	}
+	username := make([]byte, unLength[0])
+	_, err = io.ReadFull(conn, username)
+	if err != nil {
+		log.Printf("Failed to read username from connection: %s", err)
+		return
+	}
+
+	var pwLength [1]byte
+	_, err = conn.Read(pwLength[:])
+	if err != nil {
+		log.Printf("Failed to read password length from connection: %s", err)
+		return
+	}
+	password := make([]byte, pwLength[0])
+	_, err = io.ReadFull(conn, password)
+	if err != nil {
+		log.Printf("Failed to read password from connection: %s", err)
+		return
+	}
+	log.Printf("username: %s, password: %s", username, password)
+
+	/*If the username and password is verified, write this back
+	+----+--------+
+	|VER | STATUS |
+	+----+--------+
+	| 1  |   1    |
+	+----+--------+
+	*/
+	_, err = conn.Write([]byte{0x01, 0x00})
+	if err != nil {
+		log.Printf("Failed to write verification to client: %s", err)
 		return
 	}
 }

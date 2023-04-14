@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"net"
 	"testing"
@@ -73,4 +74,40 @@ func TestSocks5(t *testing.T) {
 		return
 	}
 	t.Logf("Selected method: %d", buffer[1])
+
+	/* Username and password negotiation format
+	+----+------+----------+------+----------+
+	|VER | ULEN |  UNAME   | PLEN |  PASSWD  |
+	+----+------+----------+------+----------+
+	| 1  |  1   | 1 to 255 |  1   | 1 to 255 |
+	+----+------+----------+------+----------+
+	*/
+
+	const username = "zhangsan"
+	const password = "123456"
+
+	b := &bytes.Buffer{}
+	b.WriteByte(0x01)
+	b.WriteByte(byte(len(username)))
+	b.WriteString(username)
+	b.WriteByte(byte(len(password)))
+	b.WriteString(password)
+
+	_, err = conn.Write(b.Bytes())
+	if err != nil {
+		t.Errorf("Failed to send username and password to server: %s", err)
+		return
+	}
+
+	verification := make([]byte, 2)
+	_, err = io.ReadFull(conn, verification)
+	if err != nil {
+		t.Errorf("Failed to read verification from server: %s", err)
+		return
+	}
+	if verification[1] != 0x00 {
+		t.Errorf("Authorization failed")
+		return
+	}
+	t.Log("Authorization success")
 }
