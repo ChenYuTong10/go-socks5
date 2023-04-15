@@ -1,0 +1,15 @@
+A socks5 server implemented by Go. It only roughly completes the procedure from authorization to transferring data between the remote and the client.
+
+To be more detailed, it supports username/password authorization now. However, you need to fill the specific verification process. For example, using database to verify the username and password.
+
+Then, it can handle the CONNECT command. But the BIND and UPD commands have not been finished. If you are interested in it, you can implement two commands according to rfc.
+
+Finally, it supports different addresses to send the request like ipv4, domain name and ipv6.
+
+To run it, just type 'go run main.go' in command line.
+
+The server is not strong enough to be a proxy server. There are still some problems that I have not found. You can fix it or rewrite it as you like. If you want to learn about the implementation of socks5 protocol, you can get the procedure of how to implement it step by step by seeing the commit tree.
+
+SOCKS Protocol Version 5 rfc: https://www.rfc-editor.org/rfc/rfc1928
+
+Username/Password Authentication for SOCKS V5: https://www.rfc-editor.org/rfc/rfc1929
