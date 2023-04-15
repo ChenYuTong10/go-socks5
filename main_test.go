@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"io"
 	"net"
 	"testing"
@@ -110,4 +111,87 @@ func TestSocks5(t *testing.T) {
 		return
 	}
 	t.Log("Authorization success")
+
+	/* Request details
+		    +----+-----+-------+------+----------+----------+
+	        |VER | CMD |  RSV  | ATYP | DST.ADDR | DST.PORT |
+	        +----+-----+-------+------+----------+----------+
+	        | 1  |  1  | X'00' |  1   | Variable |    2     |
+	        +----+-----+-------+------+----------+----------+
+
+	*/
+	/*
+
+		o  VER    protocol version: X'05'
+		o  CMD
+			o  CONNECT X'01'
+			o  BIND X'02'
+			o  UDP ASSOCIATE X'03'
+		o  RSV    RESERVED
+		o  ATYP   address type of following address
+			o  IP V4 address: X'01'
+			o  DOMAINNAME: X'03'
+			o  IP V6 address: X'04'
+		o  DST.ADDR       desired destination address
+		o  DST.PORT desired destination port in network octet
+		             order
+	*/
+	domain := "chouyatou.live"
+	port := 80
+
+	b = &bytes.Buffer{}
+	b.WriteByte(0x05)
+	b.WriteByte(0x01) // CONNECT
+	b.WriteByte(0x00) // RESERVED
+	b.WriteByte(0x03) // DOMAIN NAME
+	b.WriteByte(byte(len(domain)))
+	b.WriteString(domain)
+	b.WriteByte(byte(port >> 8))
+	b.WriteByte(byte(port))
+
+	_, err = conn.Write(b.Bytes())
+	if err != nil {
+		t.Errorf("Failed to write request infomation to server: %s", err)
+		return
+	}
+
+	response := make([]byte, 1024)
+	_, err = conn.Read(response)
+	if err != nil {
+		t.Errorf("Failed to read response from server: %s", err)
+		return
+	}
+	switch response[1] {
+	case 0x00:
+		t.Log("Succeed to connect remote server")
+		conn.Write([]byte("GET / HTTP/1.1\r\nHost: chouyatou.live\r\n\r\n"))
+		buffer = make([]byte, 4096)
+		n, err := conn.Read(buffer)
+		if err != nil {
+			t.Errorf("Failed to read response from server: %s", err)
+			return
+		}
+		t.Log(string(buffer[:n]))
+		conn.Close()
+	case 0x04:
+		t.Error("Host unreachable")
+	case 0x07:
+		t.Error("Command not supported")
+	case 0x08:
+		t.Error("Address type not supported")
+	default:
+		t.Errorf("Unknown reason: %x", response[1])
+	}
+
+}
+
+func TestBigEndian(t *testing.T) {
+	port := 443
+
+	t.Logf("bytes 443: %x", byte(port))
+	t.Logf("byte high 8 bits: %x", byte(port>>8))
+	t.Logf("byte low 8 bits: %x", byte(port))
+
+	_port := binary.BigEndian.Uint16([]byte{0x01, 0xbb})
+	t.Logf("after convert: %d", _port)
 }
