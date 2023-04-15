@@ -269,62 +269,80 @@ func handler(conn net.Conn) {
 		log.Printf("Failed to read request information from client: %s", err)
 		return
 	}
+	log.Printf("request options: %#v", opts)
 
+	var target string
 	if opts.AddressType == Ipv4AddrType {
-		target := net.JoinHostPort(
+		// handle ipv4 address
+		target = net.JoinHostPort(
 			net.IPv4(opts.DestAddr[0], opts.DestAddr[1], opts.DestAddr[2], opts.DestAddr[3]).String(),
 			strconv.Itoa(int(binary.BigEndian.Uint16(opts.DestPort[:]))),
 		)
-		log.Printf("remote address: %s", target)
+	} else if opts.AddressType == DomainAddrType {
+		// handle domain name address
+		target = net.JoinHostPort(
+			string(opts.DestAddr),
+			strconv.Itoa(int(binary.BigEndian.Uint16(opts.DestPort[:]))),
+		)
+	} else if opts.AddressType == Ipv6AddrType {
+		// handle ipv6 address
+		target = net.JoinHostPort(
+			net.IP(opts.DestAddr).To16().String(),
+			strconv.Itoa(int(binary.BigEndian.Uint16(opts.DestPort[:]))),
+		)
+	}
+	log.Printf("remote address: %v", target)
 
-		// Send request to remote server
-		message := &bytes.Buffer{}
-		remote, err := net.Dial("tcp", target)
-		local := remote.LocalAddr().(*net.TCPAddr)
-		if err != nil {
-			log.Printf("Failed to dial remote server: %s", err)
-			message.Write([]byte{Socks5Version, HostUnreachable})
-			message.Write([]byte{opts.Reserved, opts.AddressType})
-			message.Write(append(local.IP, byte(local.Port)))
-			err = writeBackConn(conn, message.Bytes())
-			if err != nil {
-				log.Printf("Failed to send request result to client: %s", err)
-			}
-			return
-		}
-		defer remote.Close()
-
+	// Send request to remote server
+	message := &bytes.Buffer{}
+	remote, err := net.Dial("tcp", target)
+	local := remote.LocalAddr().(*net.TCPAddr)
+	if err != nil {
+		log.Printf("Failed to dial remote server: %s", err)
 		message.Write([]byte{Socks5Version, HostUnreachable})
 		message.Write([]byte{opts.Reserved, opts.AddressType})
 		message.Write(append(local.IP, byte(local.Port)))
 		err = writeBackConn(conn, message.Bytes())
 		if err != nil {
-			log.Printf("Failed to write request result to client: %s", err)
+			log.Printf("Failed to send request result to client: %s", err)
 		}
-
-		// double transfer data between remote and client
-		var wg sync.WaitGroup
-		wg.Add(2)
-
-		go func() {
-			defer wg.Done()
-			_, err = io.Copy(conn, remote)
-			if err != nil {
-				log.Printf("Failed to read data from remote: %s", err)
-				return
-			}
-		}()
-		go func() {
-			defer wg.Done()
-			_, err = io.Copy(remote, conn)
-			if err != nil {
-				log.Printf("Failed to read data from client: %s", err)
-				return
-			}
-		}()
-
-		wg.Wait()
+		return
 	}
+	defer remote.Close()
+
+	message.Write([]byte{Socks5Version, SuccessConnect})
+	message.Write([]byte{opts.Reserved, opts.AddressType})
+	message.Write(append(local.IP, byte(local.Port)))
+	err = writeBackConn(conn, message.Bytes())
+	if err != nil {
+		log.Printf("Failed to write request result to client: %s", err)
+	}
+
+	// double transfer data between remote and client
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		log.Printf("copy from remote to client...")
+		_, err = io.Copy(conn, remote)
+		if err != nil {
+			log.Printf("Failed to read data from remote: %s", err)
+			return
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		log.Printf("copy from client to remote...")
+		_, err = io.Copy(remote, conn)
+		if err != nil {
+			log.Printf("Failed to read data from client: %s", err)
+			return
+		}
+	}()
+
+	wg.Wait()
+	log.Printf("request done!")
 }
 
 func main() {
