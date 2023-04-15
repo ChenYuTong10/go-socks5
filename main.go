@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/binary"
 	"io"
 	"log"
 	"net"
+	"strconv"
 )
 
 func handler(conn net.Conn) {
@@ -92,6 +94,78 @@ func handler(conn net.Conn) {
 	_, err = conn.Write([]byte{0x01, 0x00})
 	if err != nil {
 		log.Printf("Failed to write verification to client: %s", err)
+		return
+	}
+
+	/* Request reply format
+	+----+-----+-------+------+----------+----------+
+	|VER | REP |  RSV  | ATYP | BND.ADDR | BND.PORT |
+	+----+-----+-------+------+----------+----------+
+	| 1  |  1  | X'00' |  1   | Variable |    2     |
+	+----+-----+-------+------+----------+----------+
+	*/
+	request := make([]byte, 1024)
+	_, err = conn.Read(request)
+	if err != nil {
+		log.Printf("Failed to read request information from client: %s", err)
+		return
+	}
+	if request[0] != 0x05 {
+		log.Printf("Socks5 version mismatches: %x", request[0])
+		return
+	}
+	if request[1] != 0x01 {
+		_, err = conn.Write(append([]byte{0x05, 0x07, 0x00}, request[4:]...))
+		if err != nil {
+			log.Printf("Failed to write request result to client: %s", err)
+		}
+		return
+	}
+	if request[3] != 0x03 {
+		_, err = conn.Write(append([]byte{0x05, 0x08, 0x00}, request[4:]...))
+		if err != nil {
+			log.Printf("Failed to write request result to client: %s", err)
+		}
+		return
+	}
+	domainLen := request[4]
+	domain := request[5 : 5+domainLen]
+	log.Printf("domain name: %s", domain)
+
+	port := binary.BigEndian.Uint16(request[5+domainLen:])
+	log.Printf("port: %d", port)
+
+	addr := net.JoinHostPort(string(domain), strconv.Itoa(int(port)))
+	log.Printf("remote address: %s", addr)
+
+	// Send request to remote address
+	remote, err := net.Dial("tcp", addr)
+	if err != nil {
+		log.Printf("Failed to dial remote server: %s", err)
+		_, err = conn.Write(append([]byte{0x05, 0x04, 0x00}, request[4:]...))
+		if err != nil {
+			log.Printf("Failed to write request result to client: %s", err)
+		}
+		return
+	}
+	defer remote.Close()
+
+	_, err = conn.Write(append([]byte{0x05, 0x00, 0x00}, request[4:]...))
+	if err != nil {
+		log.Printf("Failed to write request result to client: %s", err)
+	}
+
+	go func() {
+		_, err = io.Copy(conn, remote)
+		if err != nil {
+			log.Printf("Failed to read data from remote: %s", err)
+			return
+		}
+	}()
+
+	_, err = io.Copy(remote, conn)
+	if err != nil {
+		log.Printf("Failed to read data from connection: %s", err)
 		return
 	}
 }
